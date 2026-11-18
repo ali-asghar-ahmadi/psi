@@ -24,6 +24,7 @@
 #endif
 #include "activeprofiles.h"
 #include "applicationinfo.h"
+#include "iamtokenoauthsasl.h"
 #ifdef USE_CRASH
 #include "crash.h"
 #endif
@@ -492,6 +493,7 @@ PSI_EXPORT_FUNC int main(int argc, char *argv[])
     //   instead, upgrade to QCA 2.0.2, which fixes the bug in the right
     //   place.
     QCA::Initializer init;
+    registerIamOAuthSaslProvider();
     // END NOTE
 
 #ifdef Q_OS_MACOS

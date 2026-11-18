@@ -103,6 +103,11 @@ Section "Psi" SecPsi
   WriteRegStr HKLM "${APP_REGKEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKLM "${APP_REGKEY}" "Version" "${APP_VERSION}"
 
+  WriteRegStr HKLM "Software\Classes\psi-oauth" "" "URL:Psi OAuth callback"
+  WriteRegStr HKLM "Software\Classes\psi-oauth" "URL Protocol" ""
+  WriteRegStr HKLM "Software\Classes\psi-oauth\DefaultIcon" "" "$INSTDIR\psi.exe,0"
+  WriteRegStr HKLM "Software\Classes\psi-oauth\shell\open\command" "" '"$INSTDIR\psi.exe" --uri="%1"'
+
   WriteRegStr HKLM "${APP_UNINSTALL_KEY}" "DisplayName" "${APP_NAME}"
   WriteRegStr HKLM "${APP_UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKLM "${APP_UNINSTALL_KEY}" "Publisher" "${APP_PUBLISHER}"
@@ -147,6 +152,7 @@ Section "Uninstall"
 
   DeleteRegKey HKLM "${APP_UNINSTALL_KEY}"
   DeleteRegKey HKLM "${APP_REGKEY}"
+  DeleteRegKey HKLM "Software\Classes\psi-oauth"
 
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"

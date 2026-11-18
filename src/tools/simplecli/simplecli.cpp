@@ -113,7 +113,7 @@ QHash<QByteArray, QByteArray> SimpleCli::parse(int argc, char *argv[], const QLi
         } else if (left.startsWith('-') || (left.startsWith('/') && winmode)) {
             left            = left.mid(1);
             unnamedArgument = false;
-        } else if (n == 1 && left.startsWith("xmpp:")) {
+        } else if (n == 1 && (left.startsWith("xmpp:") || left.startsWith("psi-oauth:"))) {
             unnamedArgument = false;
             left            = "uri";
             right           = str;

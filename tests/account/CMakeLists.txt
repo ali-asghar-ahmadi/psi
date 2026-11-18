@@ -5,13 +5,37 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(QT_DEFAULT_MAJOR_VERSION 6 CACHE STRING "Qt major version")
     enable_testing()
 endif()
-find_package(Qt${QT_DEFAULT_MAJOR_VERSION} REQUIRED COMPONENTS Core Test)
+find_package(Qt${QT_DEFAULT_MAJOR_VERSION} REQUIRED COMPONENTS Core Network Test)
 add_executable(account_connection_guard_test connectionguard.cpp)
 set_target_properties(account_connection_guard_test PROPERTIES AUTOMOC ON)
 target_include_directories(account_connection_guard_test PRIVATE ../../src)
 target_link_libraries(account_connection_guard_test PRIVATE
     Qt${QT_DEFAULT_MAJOR_VERSION}::Core Qt${QT_DEFAULT_MAJOR_VERSION}::Test)
 add_test(NAME account_connection_guard COMMAND account_connection_guard_test)
+
+add_executable(account_iam_token_auth_test iamtokenauthtest.cpp ../../src/iamtokenauth.cpp)
+set_target_properties(account_iam_token_auth_test PROPERTIES AUTOMOC ON)
+target_include_directories(account_iam_token_auth_test PRIVATE ../../src)
+target_link_libraries(account_iam_token_auth_test PRIVATE
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Core Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Test)
+add_test(NAME account_iam_token_auth COMMAND account_iam_token_auth_test)
+
+if(TARGET iris OR TARGET Iris::Iris)
+    add_executable(account_iam_token_oauth_sasl_test iamtokenoauthsasltest.cpp
+        ../../src/iamtokenauth.cpp ../../src/iamtokenoauthsasl.cpp)
+    set_target_properties(account_iam_token_oauth_sasl_test PROPERTIES AUTOMOC ON)
+    target_include_directories(account_iam_token_oauth_sasl_test PRIVATE ../../src)
+    if(TARGET iris)
+        target_link_libraries(account_iam_token_oauth_sasl_test PRIVATE iris)
+        target_compile_definitions(account_iam_token_oauth_sasl_test PRIVATE HAVE_BUNDLED_IRIS)
+    else()
+        target_link_libraries(account_iam_token_oauth_sasl_test PRIVATE Iris::Iris)
+    endif()
+    target_link_libraries(account_iam_token_oauth_sasl_test PRIVATE
+        Qt${QT_DEFAULT_MAJOR_VERSION}::Core Qt${QT_DEFAULT_MAJOR_VERSION}::Test)
+    add_test(NAME account_iam_token_oauth_sasl COMMAND account_iam_token_oauth_sasl_test)
+    set_tests_properties(account_iam_token_oauth_sasl PROPERTIES TIMEOUT 10)
+endif()
 
 add_executable(account_avatar_blob_inflight_test avatarblobinflighttest.cpp)
 set_target_properties(account_avatar_blob_inflight_test PROPERTIES AUTOMOC ON)

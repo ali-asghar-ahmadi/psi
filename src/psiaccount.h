@@ -57,6 +57,8 @@ class GoogleFileTransfer;
 class PEPManager;
 class PrivacyManager;
 class PsiAccount;
+struct IamTokenAuthConfig;
+struct IamTokenSet;
 class PsiCon;
 class PsiContact;
 class PsiContactList;
@@ -371,6 +373,7 @@ public slots:
     void showCert();
 
     void openUri(const QUrl &uri);
+    bool handleIamOAuthCallback(const QUrl &uri);
 
     // dj_ originally referred to 'direct jabber', if you care
     void dj_sendMessage(Message &, bool log = true);
@@ -540,6 +543,9 @@ private slots:
 private:
     class Private;
     friend class Private;
+    void startIamAuthorization(const IamTokenAuthConfig &config);
+    void finishIamAuthentication(const QString &token);
+    void saveIamTokenSet(const IamTokenAuthConfig &config, const IamTokenSet &tokens);
     Private *d;
 
     void handleEvent(const PsiEvent::Ptr &e, ActivationType activationType);

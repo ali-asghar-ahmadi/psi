@@ -22,6 +22,7 @@
 #include "actionlineedit.h"
 #include "iconaction.h"
 #include "iconset.h"
+#include "iamtokenauth.h"
 #include "iris/remotenameprovider.h"
 #include "jidutil.h"
 #include "privacydlg.h"
@@ -40,6 +41,7 @@
 #endif
 
 #include <QInputDialog>
+#include <QList>
 #include <QMessageBox>
 
 AccountModifyDlg::AccountModifyDlg(PsiCon *_psi, QWidget *parent) : QDialog(parent)
@@ -128,6 +130,21 @@ void AccountModifyDlg::init()
         pwJob->start();
     }
 #endif
+    ck_iamAuthEnabled->setChecked(acc.iamAuthEnabled);
+    le_iamAuthorizationEndpoint->setText(acc.iamAuthorizationEndpoint);
+    le_iamTokenEndpoint->setText(acc.iamTokenEndpoint);
+    le_iamRedirectUri->setText(acc.iamRedirectUri);
+    le_iamAudience->setText(acc.iamAudience);
+    le_iamClientId->setText(acc.iamClientId);
+    le_iamClientSecret->setText(acc.iamClientSecret);
+    le_iamScope->setText(acc.iamScope);
+    cb_iamGrantType->setCurrentIndex(acc.iamUseAuthorizationCode ? 1 : 0);
+    cb_iamSaslMechanism->setCurrentIndex(acc.iamUseSaslOauth ? 1 : 0);
+    cb_iamTokenType->setCurrentIndex(acc.iamUseIdToken ? 1 : 0);
+    connect(ck_iamAuthEnabled, &QCheckBox::toggled, this, &AccountModifyDlg::updateIamAuthUi);
+    connect(cb_iamGrantType, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            &AccountModifyDlg::updateIamAuthUi);
+    updateIamAuthUi();
 
     ck_host->setChecked(acc.opt_host);
     le_host->setText(acc.host);
@@ -497,6 +514,36 @@ void AccountModifyDlg::save()
         return;
     }
 
+    if (ck_iamAuthEnabled->isChecked()) {
+        IamTokenAuthConfig config;
+        config.endpoint              = le_iamTokenEndpoint->text().trimmed();
+        config.authorizationEndpoint = le_iamAuthorizationEndpoint->text().trimmed();
+        config.redirectUri            = le_iamRedirectUri->text().trimmed();
+        config.audience               = le_iamAudience->text().trimmed();
+        config.clientId               = le_iamClientId->text().trimmed();
+        config.clientSecret           = le_iamClientSecret->text();
+        config.scope                  = le_iamScope->text().trimmed();
+        config.useIdToken             = cb_iamTokenType->currentIndex() == 1;
+        config.useAuthorizationCode   = cb_iamGrantType->currentIndex() == 1;
+        QNetworkRequest request;
+        QByteArray      body;
+        QString         error;
+        QUrl authorizationUrl;
+        const bool valid = config.useAuthorizationCode
+            ? createIamAuthorizationRequest(config, QStringLiteral("validation-state"),
+                                            QStringLiteral("validation-code-verifier"), authorizationUrl, error)
+                && createIamAuthorizationCodeTokenRequest(config, QStringLiteral("validation-code"),
+                                                           QStringLiteral("validation-code-verifier"), request, body,
+                                                           error)
+            : createIamTokenRequest(config, request, body, error);
+        if (!valid) {
+            body.fill('\0');
+            QMessageBox::information(this, tr("Error"), error);
+            return;
+        }
+        body.fill('\0');
+    }
+
     // do not allow duplicate account names
     if (!pa && le_name->text().isEmpty())
         le_name->setText(newJid.domain());
@@ -520,6 +567,17 @@ void AccountModifyDlg::save()
     acc.jid      = JIDUtil::accountFromString(le_jid->text().trimmed()).bare();
     acc.pass     = le_pass->text();
     acc.opt_pass = !acc.pass.isEmpty();
+    acc.iamAuthEnabled   = ck_iamAuthEnabled->isChecked();
+    acc.iamAuthorizationEndpoint = le_iamAuthorizationEndpoint->text().trimmed();
+    acc.iamTokenEndpoint = le_iamTokenEndpoint->text().trimmed();
+    acc.iamRedirectUri   = le_iamRedirectUri->text().trimmed();
+    acc.iamAudience      = le_iamAudience->text().trimmed();
+    acc.iamClientId      = le_iamClientId->text().trimmed();
+    acc.iamClientSecret  = le_iamClientSecret->text();
+    acc.iamScope         = le_iamScope->text().trimmed();
+    acc.iamUseSaslOauth  = cb_iamSaslMechanism->currentIndex() == 1;
+    acc.iamUseIdToken    = cb_iamTokenType->currentIndex() == 1;
+    acc.iamUseAuthorizationCode = cb_iamGrantType->currentIndex() == 1;
 
     acc.opt_host = ck_host->isChecked();
     acc.host     = le_host->text();
@@ -698,4 +756,26 @@ void AccountModifyDlg::priorityCbChanged(int index) { sb_priority->setEnabled(in
 void AccountModifyDlg::autoconnectCksChanged()
 {
     ck_autoSameStatus->setEnabled(ck_auto->isChecked() || ck_connectAfterSleep->isChecked());
+}
+
+void AccountModifyDlg::updateIamAuthUi()
+{
+    const bool enabled = ck_iamAuthEnabled->isChecked();
+    const bool authorizationCode = cb_iamGrantType->currentIndex() == 1;
+    le_pass->setEnabled(!enabled);
+    pb_changepw->setEnabled(pa && !enabled);
+    ck_scram_salted_password->setEnabled(!enabled);
+    const QList<QWidget *> iamFields { lb_iamGrantType, cb_iamGrantType, lb_iamTokenEndpoint, le_iamTokenEndpoint,
+                                       lb_iamAuthorizationEndpoint, le_iamAuthorizationEndpoint, lb_iamRedirectUri,
+                                       le_iamRedirectUri, lb_iamAudience, le_iamAudience, lb_iamClientId, le_iamClientId,
+                                       lb_iamClientSecret, le_iamClientSecret,
+                                       lb_iamScope, le_iamScope, lb_iamSaslMechanism, cb_iamSaslMechanism,
+                                       lb_iamTokenType, cb_iamTokenType };
+    for (QWidget *widget : iamFields) {
+        widget->setEnabled(enabled);
+    }
+    lb_iamAuthorizationEndpoint->setVisible(enabled && authorizationCode);
+    le_iamAuthorizationEndpoint->setVisible(enabled && authorizationCode);
+    lb_iamRedirectUri->setVisible(enabled && authorizationCode);
+    le_iamRedirectUri->setVisible(enabled && authorizationCode);
 }

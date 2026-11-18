@@ -33,6 +33,7 @@
 #include "accountmodifydlg.h"
 #include "activity.h"
 #include "activitydlg.h"
+#include "iamtokenauth.h"
 #include "adduserdlg.h"
 #include "ahcommanddlg.h"
 #include "ahcservermanager.h"
@@ -52,6 +53,7 @@
 #include "chatdlg.h"
 #include "contactupdatesmanager.h"
 #include "discodlg.h"
+#include "desktoputil.h"
 #include "eventdb.h"
 #include "eventdlg.h"
 #include "filesharedlg.h"
@@ -149,6 +151,7 @@
 #endif
 
 #include <QApplication>
+#include <QCryptographicHash>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
@@ -157,9 +160,12 @@
 #include <QInputDialog>
 #include <QLayout>
 #include <QList>
+#include <QLoggingCategory>
 #include <QMap>
 #include <QMessageBox>
 #include <QNetworkProxy>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QObject>
 #include <QPixmap>
 #include <QPointer>
@@ -168,6 +174,7 @@
 #include <QScopedValueRollback>
 #include <QTimer>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QtCrypto>
 #include <qca.h>
 #ifdef HAVE_KEYCHAIN
@@ -189,6 +196,26 @@ typedef int socklen_t;
 #endif*/
 
 using namespace XMPP;
+
+Q_LOGGING_CATEGORY(iamAuthLog, "psi.iam.auth")
+
+static QString iamOAuthRandomValue(int size)
+{
+    const QByteArray randomBytes = QCA::Random::randomArray(size).toByteArray();
+    return QString::fromLatin1(
+        randomBytes.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
+}
+
+static QString iamTokenKey(const Jid &jid, const IamTokenAuthConfig &config)
+{
+    const QByteArray context
+        = (jid.bare() + QLatin1Char('|') + config.clientId + QLatin1Char('|') + config.endpoint + QLatin1Char('|')
+           + config.audience + QLatin1Char('|') + config.scope + QLatin1Char('|')
+           + (config.useAuthorizationCode ? QStringLiteral("authorization_code")
+                                          : QStringLiteral("client_credentials")))
+              .toUtf8();
+    return QString::fromLatin1(QCryptographicHash::hash(context, QCryptographicHash::Sha256).toHex());
+}
 
 static AdvancedConnector::Proxy convert_proxy(const UserAccount &acc, const Jid &jid)
 {
@@ -433,6 +460,9 @@ public:
     RosterItemExchangeTask       *rosterItemExchangeTask  = nullptr;
     QString                       currentConnectionError;
     int                           currentConnectionErrorCondition = -1;
+    QString                       iamOAuthState;
+    QString                       iamOAuthCodeVerifier;
+    bool                          iamOAuthAwaitingCallback = false;
     QTimer                       *updateOnlineContactsCountTimer_ = nullptr;
     QTimer                       *logoutTimer                     = nullptr;
 
@@ -1860,6 +1890,12 @@ void PsiAccount::login()
         return;
     QScopedValueRollback<bool> starting(d->loginInProgress, true);
 
+    d->iamOAuthAwaitingCallback = false;
+    d->iamOAuthState.fill(QChar(0));
+    d->iamOAuthState.clear();
+    d->iamOAuthCodeVerifier.fill(QChar(0));
+    d->iamOAuthCodeVerifier.clear();
+
     const bool tlsSupported             = QCA::isSupported("tls");
     const bool keyStoreManagerAvailable = !QCA::KeyStoreManager().isBusy();
     if (d->acc.ssl == UserAccount::TLS_Yes || d->acc.ssl == UserAccount::Direct_TLS) {
@@ -1952,7 +1988,17 @@ void PsiAccount::login()
     d->stream = new ClientStream(d->conn, d->tlsHandler);
     d->stream->setRequireMutualAuth(d->acc.req_mutual_auth);
     d->stream->setSSFRange(d->acc.security_level, 256);
-    d->stream->setAllowPlain(d->acc.allow_plain);
+    d->stream->setAllowPlain(d->acc.iamAuthEnabled && !d->acc.iamUseSaslOauth
+                                 ? ClientStream::AllowPlainOverTLS
+                                 : d->acc.allow_plain);
+    if (d->acc.iamAuthEnabled) {
+        const QString mechanism = d->acc.iamUseSaslOauth ? QStringLiteral("X-OAUTH2") : QStringLiteral("PLAIN");
+        const QString provider  = d->acc.iamUseSaslOauth ? QStringLiteral("psi-iam-oauth")
+                                                        : QStringLiteral("simplesasl");
+        d->stream->setSASLMechanism(mechanism);
+        d->stream->setSaslMechanismProvider(mechanism, provider);
+        qCDebug(iamAuthLog).noquote() << "Configured IAM SASL mechanism" << mechanism << "with provider" << provider;
+    }
     d->stream->setCompress(d->acc.opt_compress);
     d->stream->setLang(TranslationManager::instance()->currentXMLLanguage());
     if (d->acc.opt_keepAlive) {
@@ -2106,11 +2152,188 @@ void PsiAccount::cs_securityLayerActivated(int layer)
     }
 }
 
+void PsiAccount::startIamAuthorization(const IamTokenAuthConfig &config)
+{
+    const AccountConnectionGuard<ClientStream> guard(d->stream.data(), d->connectionGeneration);
+    auto abortIamAuth = [this, guard](const QString &message) {
+        if (!guard.isCurrent() || isDisconnecting)
+            return;
+        psi()->popupManager()->doPopup(this, jid(), IconsetFactory::iconPtr("status/error"),
+                                       tr("IAM authentication failed"), QPixmap(), nullptr, message, false,
+                                       PopupManager::AlertCustom);
+        d->stream->abortAuth();
+        d->stream->continueAfterParams();
+    };
+
+    const QString state = iamOAuthRandomValue(32);
+    const QString verifier = iamOAuthRandomValue(64);
+    QUrl authorizationUrl;
+    QString error;
+    if (state.isEmpty() || verifier.isEmpty()
+        || !createIamAuthorizationRequest(config, state, verifier, authorizationUrl, error)) {
+        abortIamAuth(error.isEmpty() ? tr("Could not generate secure OAuth2 parameters.") : error);
+        return;
+    }
+
+    d->iamOAuthState = state;
+    d->iamOAuthCodeVerifier = verifier;
+    d->iamOAuthAwaitingCallback = true;
+    if (!DesktopUtil::openUrl(authorizationUrl)) {
+        d->iamOAuthState.fill(QChar(0));
+        d->iamOAuthState.clear();
+        d->iamOAuthCodeVerifier.fill(QChar(0));
+        d->iamOAuthCodeVerifier.clear();
+        d->iamOAuthAwaitingCallback = false;
+        abortIamAuth(tr("Could not open the system browser for IAM login."));
+        return;
+    }
+
+    QTimer::singleShot(300000, this, [this, guard, state, abortIamAuth]() {
+        if (!guard.isCurrent() || isDisconnecting || !d->iamOAuthAwaitingCallback || d->iamOAuthState != state)
+            return;
+        d->iamOAuthState.fill(QChar(0));
+        d->iamOAuthState.clear();
+        d->iamOAuthCodeVerifier.fill(QChar(0));
+        d->iamOAuthCodeVerifier.clear();
+        d->iamOAuthAwaitingCallback = false;
+        abortIamAuth(tr("Timed out waiting for IAM login."));
+    });
+}
+
+void PsiAccount::finishIamAuthentication(const QString &token)
+{
+    if (!d->stream || isDisconnecting || token.isEmpty())
+        return;
+    d->stream->setPassword(token);
+    d->stream->continueAfterParams();
+}
+
+void PsiAccount::saveIamTokenSet(const IamTokenAuthConfig &config, const IamTokenSet &tokens)
+{
+#ifdef HAVE_KEYCHAIN
+    if (!isKeychainEnabled()) {
+        qCWarning(iamAuthLog) << "IAM token caching is unavailable because system keychain storage is disabled";
+        return;
+    }
+    auto job = new QKeychain::WritePasswordJob(QLatin1String("xmpp-iam"), this);
+    job->setKey(iamTokenKey(d->jid, config));
+    job->setTextData(QString::fromUtf8(serializeIamTokenSet(tokens)));
+    job->setAutoDelete(true);
+    connect(job, &QKeychain::Job::finished, this, [](QKeychain::Job *finishedJob) {
+        if (finishedJob->error() != QKeychain::NoError)
+            qWarning("Failed to save IAM tokens in the system keychain");
+    });
+    job->start();
+#else
+    Q_UNUSED(tokens);
+    qCWarning(iamAuthLog) << "IAM token caching is unavailable because this build has no keychain support";
+#endif
+}
+
+bool PsiAccount::handleIamOAuthCallback(const QUrl &uri)
+{
+    if (!d->iamOAuthAwaitingCallback || !d->stream || isDisconnecting)
+        return false;
+
+    QString code;
+    QString error;
+    bool authorizationError = false;
+    if (!parseIamAuthorizationCallback(d->acc.iamRedirectUri, uri, d->iamOAuthState, code,
+                                       authorizationError, error))
+        return false;
+
+    const AccountConnectionGuard<ClientStream> guard(d->stream.data(), d->connectionGeneration);
+    auto abortIamAuth = [this, guard](const QString &message) {
+        if (!guard.isCurrent() || isDisconnecting)
+            return;
+        psi()->popupManager()->doPopup(this, jid(), IconsetFactory::iconPtr("status/error"),
+                                       tr("IAM authentication failed"), QPixmap(), nullptr, message, false,
+                                       PopupManager::AlertCustom);
+        d->stream->abortAuth();
+        d->stream->continueAfterParams();
+    };
+
+    if (authorizationError || !error.isEmpty()) {
+        d->iamOAuthAwaitingCallback = false;
+        d->iamOAuthState.fill(QChar(0));
+        d->iamOAuthState.clear();
+        d->iamOAuthCodeVerifier.fill(QChar(0));
+        d->iamOAuthCodeVerifier.clear();
+        abortIamAuth(authorizationError ? tr("IAM login was denied or could not be completed.")
+                                        : tr("The IAM callback did not contain an authorization code."));
+        return true;
+    }
+
+    IamTokenAuthConfig config;
+    config.endpoint       = d->acc.iamTokenEndpoint;
+    config.redirectUri    = d->acc.iamRedirectUri;
+    config.audience       = d->acc.iamAudience;
+    config.clientId       = d->acc.iamClientId;
+    config.clientSecret   = d->acc.iamClientSecret;
+    config.scope          = d->acc.iamScope;
+    config.useIdToken     = d->acc.iamUseIdToken;
+    config.useAuthorizationCode = d->acc.iamUseAuthorizationCode;
+
+    QByteArray body;
+    QNetworkRequest request;
+    if (!createIamAuthorizationCodeTokenRequest(config, code, d->iamOAuthCodeVerifier, request, body, error)) {
+        d->iamOAuthAwaitingCallback = false;
+        d->iamOAuthState.fill(QChar(0));
+        d->iamOAuthState.clear();
+        d->iamOAuthCodeVerifier.fill(QChar(0));
+        d->iamOAuthCodeVerifier.clear();
+        abortIamAuth(error);
+        return true;
+    }
+
+    d->iamOAuthAwaitingCallback = false;
+    d->iamOAuthState.fill(QChar(0));
+    d->iamOAuthState.clear();
+    d->iamOAuthCodeVerifier.fill(QChar(0));
+    d->iamOAuthCodeVerifier.clear();
+
+    QNetworkReply *reply = d->psi->networkAccessManager()->post(request, body);
+    body.fill('\0');
+    QTimer::singleShot(30000, reply, [reply]() {
+        if (reply->isRunning())
+            reply->abort();
+    });
+    connect(d->stream, &QObject::destroyed, reply, &QNetworkReply::abort);
+    connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, guard, config, abortIamAuth]() {
+        if (!guard.isCurrent() || isDisconnecting)
+            return;
+
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        IamTokenSet tokens;
+        QString error;
+        if (reply->error() != QNetworkReply::NoError) {
+            abortIamAuth(tr("Could not connect to the OAuth2 token endpoint."));
+            return;
+        }
+        if (status < 200 || status >= 300) {
+            abortIamAuth(tr("OAuth2 token endpoint returned HTTP status %1.").arg(status));
+            return;
+        }
+        if (!parseIamTokenSet(reply->readAll(), config.useIdToken, tokens, error)) {
+            abortIamAuth(error);
+            return;
+        }
+
+        saveIamTokenSet(config, tokens);
+        finishIamAuthentication(selectedIamToken(tokens, config.useIdToken));
+    });
+    return true;
+}
+
 void PsiAccount::cs_needAuthParams(bool user, bool pass, bool realm)
 {
     const AccountConnectionGuard<ClientStream> guard(d->stream.data(), d->connectionGeneration);
     if (!guard.isCurrent() || isDisconnecting)
         return;
+    if (d->acc.iamAuthEnabled)
+        qCDebug(iamAuthLog) << "IAM SASL requested credentials: username" << user << "password" << pass
+                            << "TLS active" << d->usingSSL;
     if (user) {
         if (d->acc.customAuth && !d->acc.authid.isEmpty())
             d->stream->setUsername(d->acc.authid);
@@ -2119,7 +2342,7 @@ void PsiAccount::cs_needAuthParams(bool user, bool pass, bool realm)
     } else if (d->acc.customAuth && !d->acc.authid.isEmpty())
         qWarning("Custom authentication user not used");
 
-    if (pass) {
+    if (pass && !d->acc.iamAuthEnabled) {
         d->stream->setPassword(d->acc.pass);
         if (d->acc.storeSaltedHashedPassword) // TODO can we keep this in keychain too?
             d->stream->setSCRAMStoredSaltedHash(d->acc.scramSaltedHashPassword);
@@ -2136,8 +2359,185 @@ void PsiAccount::cs_needAuthParams(bool user, bool pass, bool realm)
     if (d->acc.customAuth)
         d->stream->setAuthzid(d->jid.bare());
 
+    if (pass && d->acc.iamAuthEnabled) {
+        auto abortIamAuth = [this, guard](const QString &message) {
+            if (!guard.isCurrent() || isDisconnecting)
+                return;
+            psi()->popupManager()->doPopup(this, jid(), IconsetFactory::iconPtr("status/error"),
+                                           tr("IAM authentication failed"), QPixmap(), nullptr, message, false,
+                                           PopupManager::AlertCustom);
+            d->stream->abortAuth();
+            d->stream->continueAfterParams();
+        };
+
+        if (!d->usingSSL) {
+            abortIamAuth(tr("IAM token authentication requires an encrypted XMPP connection."));
+            return;
+        }
+
+        IamTokenAuthConfig config;
+        config.endpoint              = d->acc.iamTokenEndpoint;
+        config.authorizationEndpoint = d->acc.iamAuthorizationEndpoint;
+        config.redirectUri           = d->acc.iamRedirectUri;
+        config.audience               = d->acc.iamAudience;
+        config.clientId               = d->acc.iamClientId;
+        config.clientSecret           = d->acc.iamClientSecret;
+        config.scope                 = d->acc.iamScope;
+        config.useIdToken            = d->acc.iamUseIdToken;
+        config.useAuthorizationCode  = d->acc.iamUseAuthorizationCode;
+
+        auto useTokenSet = [this, guard, config, abortIamAuth](const IamTokenSet &tokens, bool save) {
+            const QString token = selectedIamToken(tokens, config.useIdToken);
+            if (token.isEmpty()) {
+                abortIamAuth(tr("The selected token was missing from the OAuth2 response."));
+                return;
+            }
+            if (save)
+                saveIamTokenSet(config, tokens);
+            if (guard.isCurrent() && !isDisconnecting)
+                finishIamAuthentication(token);
+        };
+
+        auto startFreshAuthentication = [this, guard, config, abortIamAuth, useTokenSet]() {
+            if (!guard.isCurrent() || isDisconnecting)
+                return;
+            if (config.useAuthorizationCode) {
+                startIamAuthorization(config);
+                return;
+            }
+
+            QNetworkRequest request;
+            QByteArray body;
+            QString error;
+            if (!createIamTokenRequest(config, request, body, error)) {
+                abortIamAuth(error);
+                return;
+            }
+
+            QNetworkReply *reply = d->psi->networkAccessManager()->post(request, body);
+            body.fill('\0');
+            QTimer::singleShot(30000, reply, [reply]() {
+                if (reply->isRunning())
+                    reply->abort();
+            });
+            connect(d->stream, &QObject::destroyed, reply, &QNetworkReply::abort);
+            connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
+            connect(reply, &QNetworkReply::finished, this, [this, reply, guard, config, abortIamAuth, useTokenSet]() {
+                if (!guard.isCurrent() || isDisconnecting)
+                    return;
+                const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                if (reply->error() != QNetworkReply::NoError) {
+                    abortIamAuth(tr("Could not connect to the OAuth2 token endpoint."));
+                    return;
+                }
+                if (status < 200 || status >= 300) {
+                    abortIamAuth(tr("OAuth2 token endpoint returned HTTP status %1.").arg(status));
+                    return;
+                }
+                IamTokenSet tokens;
+                QString error;
+                if (!parseIamTokenSet(reply->readAll(), config.useIdToken, tokens, error)) {
+                    abortIamAuth(error);
+                    return;
+                }
+                useTokenSet(tokens, true);
+            });
+        };
+
+        std::function<void(const QString &)> refreshIamToken;
+        refreshIamToken = [this, guard, config, abortIamAuth, useTokenSet, startFreshAuthentication](
+                              const QString &refreshToken) {
+            QNetworkRequest request;
+            QByteArray body;
+            QString error;
+            if (!createIamRefreshTokenRequest(config, refreshToken, request, body, error)) {
+                abortIamAuth(error);
+                return;
+            }
+
+            QNetworkReply *reply = d->psi->networkAccessManager()->post(request, body);
+            body.fill('\0');
+            QTimer::singleShot(30000, reply, [reply]() {
+                if (reply->isRunning())
+                    reply->abort();
+            });
+            connect(d->stream, &QObject::destroyed, reply, &QNetworkReply::abort);
+            connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
+            connect(reply, &QNetworkReply::finished,
+                    this, [this, reply, guard, config, refreshToken, abortIamAuth, useTokenSet,
+                           startFreshAuthentication]() {
+                        if (!guard.isCurrent() || isDisconnecting)
+                            return;
+                        const QByteArray response = reply->readAll();
+                        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                        if (isIamRefreshTokenRejected(response)) {
+                            startFreshAuthentication();
+                            return;
+                        }
+                        if (reply->error() != QNetworkReply::NoError) {
+                            abortIamAuth(tr("Could not connect to the OAuth2 token endpoint."));
+                            return;
+                        }
+                        if (status < 200 || status >= 300) {
+                            abortIamAuth(tr("OAuth2 token endpoint returned HTTP status %1.").arg(status));
+                            return;
+                        }
+                        IamTokenSet tokens;
+                        QString error;
+                        if (!parseIamTokenSet(response, config.useIdToken, tokens, error)) {
+                            abortIamAuth(error);
+                            return;
+                        }
+                        if (tokens.refreshToken.isEmpty())
+                            tokens.refreshToken = refreshToken;
+                        useTokenSet(tokens, true);
+                    });
+        };
+
 #ifdef HAVE_KEYCHAIN
-    const bool useKeyring = pass && isKeychainEnabled();
+        if (isKeychainEnabled()) {
+            auto job = new QKeychain::ReadPasswordJob(QLatin1String("xmpp-iam"), this);
+            job->setKey(iamTokenKey(d->jid, config));
+            job->setAutoDelete(true);
+            connect(job, &QKeychain::Job::finished, this,
+                    [this, guard, config, abortIamAuth, useTokenSet, startFreshAuthentication,
+                     refreshIamToken](QKeychain::Job *finishedJob) {
+                        if (!guard.isCurrent() || isDisconnecting)
+                            return;
+                        if (finishedJob->error() == QKeychain::EntryNotFound) {
+                            startFreshAuthentication();
+                            return;
+                        }
+                        if (finishedJob->error() != QKeychain::NoError) {
+                            abortIamAuth(tr("Could not read IAM tokens from the system keychain."));
+                            return;
+                        }
+
+                        IamTokenSet tokens;
+                        const QByteArray stored
+                            = static_cast<QKeychain::ReadPasswordJob *>(finishedJob)->textData().toUtf8();
+                        if (!parseStoredIamTokenSet(stored, tokens)) {
+                            startFreshAuthentication();
+                            return;
+                        }
+                        if (isIamAccessTokenValid(tokens) && !selectedIamToken(tokens, config.useIdToken).isEmpty()) {
+                            useTokenSet(tokens, false);
+                        } else if (!tokens.refreshToken.isEmpty()) {
+                            refreshIamToken(tokens.refreshToken);
+                        } else {
+                            startFreshAuthentication();
+                        }
+                    });
+            job->start();
+            return;
+        }
+#endif
+        startFreshAuthentication();
+        return;
+    }
+
+#ifdef HAVE_KEYCHAIN
+    const bool useKeyring = pass && !d->acc.iamAuthEnabled && isKeychainEnabled();
     if (pass) {
         if (useKeyring) {
             auto pwJob = new QKeychain::ReadPasswordJob(QLatin1String("xmpp"),
@@ -2285,6 +2685,12 @@ void PsiAccount::sessionStarted()
 
 void PsiAccount::cs_connectionClosed()
 {
+    d->iamOAuthAwaitingCallback = false;
+    d->iamOAuthState.fill(QChar(0));
+    d->iamOAuthState.clear();
+    d->iamOAuthCodeVerifier.fill(QChar(0));
+    d->iamOAuthCodeVerifier.clear();
+
     if (isDisconnecting)
         d->finishLogout();
     else
@@ -2559,7 +2965,7 @@ void PsiAccount::cs_error(int err)
     v_isActive = false;
 
     // If a password failure, prompt for correct password
-    if (badPass) {
+    if (badPass && !d->acc.iamAuthEnabled) {
         if (passwordPrompt()) {
             isDisconnecting = false;
             login();

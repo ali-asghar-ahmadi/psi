@@ -213,6 +213,8 @@ list(APPEND HEADERS
     multifiletransferitem.h
     multifiletransfermodel.h
     networkaccessmanager.h
+    iamtokenauth.h
+    iamtokenoauthsasl.h
     passdialog.h
     pepmanager.h
     pgpkeydlg.h
@@ -476,6 +478,8 @@ list(APPEND SOURCES
     htmltextcontroller.cpp
     httpauthmanager.cpp
     httputil.cpp
+    iamtokenauth.cpp
+    iamtokenoauthsasl.cpp
     infodlg.cpp
     invitetogroupchatmenu.cpp
     jidutil.cpp

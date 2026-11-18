@@ -18,6 +18,8 @@
 
 #include "proxyprotocol.h"
 #include <xmpp.h>
+#include <iris/jid/jid.h>
+#include <iris/xmpp-core/xmpp_clientstream.h>
 
 #include <QtTest/QtTest>
 #include <QTcpServer>
@@ -33,6 +35,7 @@ private slots:
     void rejectsUnsupportedAddressPairs();
     void sendsHeaderBeforeStreamData();
     void rejectsConnectionProxy();
+    void reportsMissingTlsHandlerWithoutCrashing();
 };
 
 void ProxyProtocolTest::createsIpv4Header()
@@ -100,6 +103,23 @@ void ProxyProtocolTest::rejectsConnectionProxy()
 
     QCOMPARE(errorSpy.count(), 1);
     QCOMPARE(connector.errorCode(), int(XMPP::AdvancedConnector::ErrProxyProtocol));
+}
+
+void ProxyProtocolTest::reportsMissingTlsHandlerWithoutCrashing()
+{
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+
+    XMPP::AdvancedConnector connector;
+    connector.setOptHostPort(QStringLiteral("127.0.0.1"), server.serverPort());
+    connector.setOptSSL(true);
+    XMPP::ClientStream stream(&connector);
+    QSignalSpy errorSpy(&stream, SIGNAL(error(int)));
+
+    stream.connectToServer(XMPP::Jid(QStringLiteral("user@example.org")), false);
+
+    QTRY_COMPARE(errorSpy.count(), 1);
+    QCOMPARE(errorSpy.takeFirst().at(0).toInt(), int(XMPP::ClientStream::ErrTLS));
 }
 
 QTEST_GUILESS_MAIN(ProxyProtocolTest)

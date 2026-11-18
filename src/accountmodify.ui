@@ -837,6 +837,16 @@
         </layout>
        </item>
        <item>
+        <widget class="QCheckBox" name="ck_proxyProtocol">
+         <property name="toolTip">
+          <string>Send a PROXY protocol v1 header before XMPP data. This requires a direct connection without an HTTP or SOCKS connection proxy.</string>
+         </property>
+         <property name="text">
+          <string>Send PROXY protocol v1 header</string>
+         </property>
+        </widget>
+       </item>
+       <item>
         <widget class="QCheckBox" name="ck_useProxyForUpload">
          <property name="text">
           <string>Use this proxy server for HTTP file upload</string>

@@ -1977,6 +1977,7 @@ void PsiAccount::login()
         connect(d->tlsHandler, &QCATLSHandler::tlsHandshaken, this, guard.callback(this, &PsiAccount::tls_handshaken));
     }
     d->conn->setProxy(p);
+    d->conn->setOptProxyProtocol(d->acc.opt_proxyProtocol);
     if (!d->acc.proxyID.isEmpty() && d->acc.opt_remoteSrvLookup)
         d->conn->setRemoteDns(ProxyManager::instance()->getItem(d->acc.proxyID).settings.dnsServer());
     d->conn->setOptTlsSrv(d->acc.ssl == UserAccount::TLS_Auto || d->acc.ssl == UserAccount::TLS_Yes);
@@ -2818,6 +2819,9 @@ void PsiAccount::getErrorInfo(int err, AdvancedConnector *conn, Stream *stream, 
             s = tr("Error during proxy negotiation");
         else if (x == XMPP::AdvancedConnector::ErrProxyAuth) {
             s      = tr("Proxy authentication failed");
+            reconn = false;
+        } else if (x == XMPP::AdvancedConnector::ErrProxyProtocol) {
+            s = tr("Could not send PROXY protocol header; verify the connection addresses and disable the connection proxy");
             reconn = false;
         } else if (x == XMPP::AdvancedConnector::ErrStream)
             s = tr("Socket/stream error");

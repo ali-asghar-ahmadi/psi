@@ -209,10 +209,18 @@ void AccountModifyDlg::init()
     pc = ProxyManager::instance()->createProxyChooser(tab_connection);
     replaceWidget(lb_proxychooser, pc);
     pc->setCurrentItem(acc.proxyID);
+    ck_proxyProtocol->setChecked(acc.opt_proxyProtocol && acc.proxyID.isEmpty());
+    ck_proxyProtocol->setEnabled(acc.proxyID.isEmpty());
 
     // Behind a proxy with a DNS server, the server may be looked up through the proxy.
     remoteSrvLookup = acc.opt_remoteSrvLookup;
-    connect(pc, &ProxyChooser::itemChanged, this, [this]() { updateSrvLookup(true); });
+    connect(pc, &ProxyChooser::itemChanged, this, [this]() {
+        updateSrvLookup(true);
+        const bool directConnection = pc->currentItem().isEmpty();
+        ck_proxyProtocol->setEnabled(directConnection);
+        if (!directConnection)
+            ck_proxyProtocol->setChecked(false);
+    });
     connect(ProxyManager::instance(), &ProxyManager::settingsChanged, this, [this]() { updateSrvLookup(true); });
     connect(cb_srvLookup, QOverload<int>::of(&QComboBox::activated), this,
             [this]() { remoteSrvLookup = cb_srvLookup->currentData().toBool(); });
@@ -621,6 +629,7 @@ void AccountModifyDlg::save()
 
     acc.storeSaltedHashedPassword = ck_scram_salted_password->isChecked();
     acc.proxyID                   = pc->currentItem();
+    acc.opt_proxyProtocol         = ck_proxyProtocol->isChecked();
     acc.opt_remoteSrvLookup       = remoteSrvLookup;
 
     if (pa) {

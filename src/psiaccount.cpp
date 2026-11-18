@@ -1977,9 +1977,11 @@ void PsiAccount::login()
         connect(d->tlsHandler, &QCATLSHandler::tlsHandshaken, this, guard.callback(this, &PsiAccount::tls_handshaken));
     }
     d->conn->setProxy(p);
+    d->conn->setOptProxyProtocol(d->acc.opt_proxyProtocol);
     if (!d->acc.proxyID.isEmpty() && d->acc.opt_remoteSrvLookup)
         d->conn->setRemoteDns(ProxyManager::instance()->getItem(d->acc.proxyID).settings.dnsServer());
-    d->conn->setOptTlsSrv(d->acc.ssl == UserAccount::TLS_Auto || d->acc.ssl == UserAccount::TLS_Yes);
+    d->conn->setOptTlsSrv(
+        d->tlsHandler && (d->acc.ssl == UserAccount::TLS_Auto || d->acc.ssl == UserAccount::TLS_Yes));
     if (useHost) {
         d->conn->setOptHostPort(host, quint16(port));
         d->conn->setOptSSL(d->acc.ssl == UserAccount::Direct_TLS);
@@ -2819,6 +2821,9 @@ void PsiAccount::getErrorInfo(int err, AdvancedConnector *conn, Stream *stream, 
         else if (x == XMPP::AdvancedConnector::ErrProxyAuth) {
             s      = tr("Proxy authentication failed");
             reconn = false;
+        } else if (x == XMPP::AdvancedConnector::ErrProxyProtocol) {
+            s = tr("Could not send PROXY protocol header; verify the connection addresses and disable the connection proxy");
+            reconn = false;
         } else if (x == XMPP::AdvancedConnector::ErrStream)
             s = tr("Socket/stream error");
         str = tr("Connection Error: %1").arg(s);
@@ -2856,11 +2861,14 @@ void PsiAccount::getErrorInfo(int err, AdvancedConnector *conn, Stream *stream, 
         if (x == XMPP::ClientStream::TLSStart)
             s = tr("Server rejected STARTTLS");
         else if (x == XMPP::ClientStream::TLSFail) {
-            int t = tlsHandler->tlsError();
-            if (t == QCA::TLS::ErrorHandshake)
+            if (!tlsHandler) {
+                s      = tr("TLS is required but no TLS handler is available");
+                reconn = false;
+            } else if (tlsHandler->tlsError() == QCA::TLS::ErrorHandshake) {
                 s = tr("TLS handshake error");
-            else
+            } else {
                 s = tr("Broken security layer (TLS)");
+            }
         }
         str = s;
     } else if (err == XMPP::ClientStream::ErrAuth) {

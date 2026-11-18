@@ -100,6 +100,7 @@ void UserAccount::reset()
     allow_plain               = XMPP::ClientStream::AllowPlainOverTLS;
     opt_useProxyForUpload     = true;
     opt_remoteSrvLookup       = true;
+    opt_proxyProtocol         = false;
     opt_compress              = true;
     opt_log                   = true;
     opt_reconn                = true;
@@ -160,6 +161,7 @@ void UserAccount::fromOptions(OptionsTree *o, QString base)
     opt_sm                 = o->getOption(base + ".enable-sm", true).toBool();
     opt_useProxyForUpload  = o->getOption(base + ".use-proxy-for-upload", true).toBool();
     opt_remoteSrvLookup    = o->getOption(base + ".remote-srv-lookup", true).toBool();
+    opt_proxyProtocol      = o->getOption(base + ".proxy-protocol", false).toBool();
     opt_compress           = o->getOption(base + ".compress").toBool();
     req_mutual_auth        = o->getOption(base + ".require-mutual-auth").toBool();
     opt_automatic_resource = o->getOption(base + ".automatic-resource").toBool();
@@ -483,6 +485,7 @@ void UserAccount::toOptions(OptionsTree *o, QString base)
     }
 
     o->setOption(base + ".proxy-id", proxyID);
+    o->setOption(base + ".proxy-protocol", opt_proxyProtocol);
 
     o->removeOption(base + ".encryption-methods", true);
     for (auto it = encryptionMethods.cbegin(); it != encryptionMethods.cend(); ++it) {

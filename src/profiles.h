@@ -68,7 +68,7 @@ public:
     quint16 port;
     int     priority;
     bool opt_enabled, opt_pass, opt_host, opt_auto, opt_keepAlive, opt_log, opt_connectAfterSleep, opt_autoSameStatus,
-        opt_reconn, opt_ignoreSSLWarnings, opt_useProxyForUpload, opt_compress, opt_sm;
+        opt_reconn, opt_ignoreSSLWarnings, opt_useProxyForUpload, opt_compress, opt_sm, opt_proxyProtocol;
     bool opt_remoteSrvLookup; // look up the server with the DNS server of the proxy, when it has one
 
     bool                               req_mutual_auth;

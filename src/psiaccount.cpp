@@ -2861,11 +2861,14 @@ void PsiAccount::getErrorInfo(int err, AdvancedConnector *conn, Stream *stream, 
         if (x == XMPP::ClientStream::TLSStart)
             s = tr("Server rejected STARTTLS");
         else if (x == XMPP::ClientStream::TLSFail) {
-            int t = tlsHandler->tlsError();
-            if (t == QCA::TLS::ErrorHandshake)
+            if (!tlsHandler) {
+                s      = tr("TLS is required but no TLS handler is available");
+                reconn = false;
+            } else if (tlsHandler->tlsError() == QCA::TLS::ErrorHandshake) {
                 s = tr("TLS handshake error");
-            else
+            } else {
                 s = tr("Broken security layer (TLS)");
+            }
         }
         str = s;
     } else if (err == XMPP::ClientStream::ErrAuth) {

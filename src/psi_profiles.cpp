@@ -73,6 +73,17 @@ void UserAccount::reset()
     ssl                       = TLS_Auto;
     jid                       = "";
     pass                      = "";
+    iamAuthEnabled            = false;
+    iamAuthorizationEndpoint.clear();
+    iamTokenEndpoint.clear();
+    iamRedirectUri = QStringLiteral("psi-oauth://callback");
+    iamAudience.clear();
+    iamClientId.clear();
+    iamClientSecret.clear();
+    iamScope.clear();
+    iamUseSaslOauth         = false;
+    iamUseIdToken             = false;
+    iamUseAuthorizationCode   = true;
     scramSaltedHashPassword   = "";
     opt_pass                  = false;
     port                      = 5222;
@@ -186,6 +197,21 @@ void UserAccount::fromOptions(OptionsTree *o, QString base)
         opt_pass = true;
         pass     = decodePassword(tmp, jid);
     }
+
+    // IAM settings are nested under an internal ".iam" node, not direct account children.
+    iamAuthEnabled            = o->getOption(base + ".iam.enabled", false).toBool();
+    iamAuthorizationEndpoint  = o->getOption(base + ".iam.authorization-endpoint", QString()).toString();
+    iamTokenEndpoint          = o->getOption(base + ".iam.oauth2-address", QString()).toString();
+    iamRedirectUri            = o->getOption(base + ".iam.redirect-uri", QStringLiteral("psi-oauth://callback")).toString();
+    iamUseAuthorizationCode   = o->getOption(base + ".iam.authorization-code", false).toBool();
+    iamAudience               = o->getOption(base + ".iam.audience", QString()).toString();
+    iamClientId               = o->getOption(base + ".iam.client-id", QString()).toString();
+    tmp                       = o->getOption(base + ".iam.client-secret", QString()).toString();
+    if (!tmp.isEmpty())
+        iamClientSecret = decodePassword(tmp, jid + QStringLiteral(".iam"));
+    iamUseSaslOauth = o->getOption(base + ".iam.use-sasl-oauth", false).toBool();
+    iamScope        = o->getOption(base + ".iam.scope", QString()).toString();
+    iamUseIdToken   = o->getOption(base + ".iam.use-id-token", false).toBool();
 
     opt_host       = o->getOption(base + ".use-host").toBool();
     security_level = o->getOption(base + ".security-level").toInt();
@@ -342,6 +368,19 @@ void UserAccount::toOptions(OptionsTree *o, QString base)
     o->setOption(base + ".custom-auth.use", customAuth);
     o->setOption(base + ".custom-auth.authid", authid);
     o->setOption(base + ".custom-auth.realm", realm);
+
+    o->setOption(base + ".iam.enabled", iamAuthEnabled);
+    o->setOption(base + ".iam.authorization-endpoint", iamAuthorizationEndpoint);
+    o->setOption(base + ".iam.oauth2-address", iamTokenEndpoint);
+    o->setOption(base + ".iam.redirect-uri", iamRedirectUri);
+    o->setOption(base + ".iam.authorization-code", iamUseAuthorizationCode);
+    o->setOption(base + ".iam.audience", iamAudience);
+    o->setOption(base + ".iam.client-id", iamClientId);
+    o->setOption(base + ".iam.client-secret",
+                 iamClientSecret.isEmpty() ? QString() : encodePassword(iamClientSecret, jid + QStringLiteral(".iam")));
+    o->setOption(base + ".iam.use-sasl-oauth", iamUseSaslOauth);
+    o->setOption(base + ".iam.scope", iamScope);
+    o->setOption(base + ".iam.use-id-token", iamUseIdToken);
 
     o->setOption(base + ".scram.store-salted-password", storeSaltedHashedPassword);
     o->setOption(base + ".scram.salted-password", scramSaltedHashPassword);

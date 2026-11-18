@@ -169,6 +169,178 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="gb_iamAuth">
+         <property name="title">
+          <string>IAM authentication</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayoutIam">
+          <item>
+           <widget class="QCheckBox" name="ck_iamAuthEnabled">
+            <property name="text">
+             <string>Use OAuth2 IAM authentication</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QFormLayout" name="formLayoutIam">
+            <item row="0" column="0">
+             <widget class="QLabel" name="lb_iamGrantType">
+              <property name="text">
+               <string>OAuth2 flow:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QComboBox" name="cb_iamGrantType">
+              <item>
+               <property name="text">
+                <string>Client Credentials (no user login)</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Authorization Code + PKCE (browser login)</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="lb_iamAuthorizationEndpoint">
+              <property name="text">
+               <string>OAuth2 authorization endpoint:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QLineEdit" name="le_iamAuthorizationEndpoint">
+              <property name="placeholderText">
+               <string>https://example.com/oauth2/authorize</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="lb_iamTokenEndpoint">
+              <property name="text">
+               <string>OAuth2 token endpoint:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QLineEdit" name="le_iamTokenEndpoint">
+              <property name="placeholderText">
+               <string>https://example.com/oauth2/token</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="0">
+             <widget class="QLabel" name="lb_iamRedirectUri">
+              <property name="text">
+               <string>Redirect URI:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="1">
+             <widget class="QLineEdit" name="le_iamRedirectUri">
+              <property name="placeholderText">
+               <string>psi-oauth://callback</string>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="0">
+             <widget class="QLabel" name="lb_iamAudience">
+              <property name="text">
+               <string>Audience:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="1">
+             <widget class="QLineEdit" name="le_iamAudience"/>
+            </item>
+            <item row="5" column="0">
+             <widget class="QLabel" name="lb_iamClientId">
+              <property name="text">
+               <string>Client ID:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="5" column="1">
+             <widget class="QLineEdit" name="le_iamClientId"/>
+            </item>
+            <item row="6" column="0">
+             <widget class="QLabel" name="lb_iamClientSecret">
+              <property name="text">
+               <string>Client secret (optional for PKCE):</string>
+              </property>
+             </widget>
+            </item>
+            <item row="6" column="1">
+             <widget class="QLineEdit" name="le_iamClientSecret">
+              <property name="echoMode">
+               <enum>QLineEdit::Password</enum>
+              </property>
+              <property name="inputMethodHints">
+               <set>Qt::ImhNoAutoUppercase|Qt::ImhNoPredictiveText|Qt::ImhPreferLatin|Qt::ImhSensitiveData</set>
+              </property>
+             </widget>
+            </item>
+            <item row="7" column="0">
+             <widget class="QLabel" name="lb_iamScope">
+              <property name="text">
+               <string>Scope:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="7" column="1">
+             <widget class="QLineEdit" name="le_iamScope"/>
+            </item>
+            <item row="8" column="0">
+             <widget class="QLabel" name="lb_iamSaslMechanism">
+              <property name="text">
+               <string>SASL mechanism:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="8" column="1">
+             <widget class="QComboBox" name="cb_iamSaslMechanism">
+              <item>
+               <property name="text">
+                <string>PLAIN (token as password)</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>X-OAUTH2 (SASL token response)</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+            <item row="9" column="0">
+             <widget class="QLabel" name="lb_iamTokenType">
+              <property name="text">
+               <string>Token to use:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="9" column="1">
+             <widget class="QComboBox" name="cb_iamTokenType">
+              <item>
+               <property name="text">
+                <string>Access token</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>ID token</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <widget class="QGroupBox" name="groupBox46">
          <property name="title">
           <string>Settings</string>

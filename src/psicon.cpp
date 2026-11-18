@@ -755,6 +755,7 @@ bool PsiCon::init()
     connect(ActiveProfiles::instance(), SIGNAL(quitRequested()), SLOT(closeProgram()));
 
     DesktopUtil::setUrlHandler("xmpp", this, "openUri");
+    DesktopUtil::setUrlHandler("psi-oauth", this, "openUri");
     DesktopUtil::setUrlHandler("x-psi-atstyle", this, "openAtStyleUri");
 
 #ifdef USE_PEP
@@ -849,6 +850,7 @@ void PsiCon::deinit()
     GlobalShortcutManager::clear();
 
     DesktopUtil::unsetUrlHandler("xmpp");
+    DesktopUtil::unsetUrlHandler("psi-oauth");
     DesktopUtil::unsetUrlHandler("x-psi-atstyle");
 }
 
@@ -1351,6 +1353,16 @@ void PsiCon::openUri(const QString &uri)
 void PsiCon::openUri(const QUrl &uri)
 {
     // qDebug() << "uri:  " << uri.toString();
+
+    if (uri.scheme() == QLatin1String("psi-oauth")) {
+        for (PsiAccount *account : d->contactList->accounts()) {
+            if (account->handleIamOAuthCallback(uri))
+                return;
+        }
+        QMessageBox::critical(nullptr, tr("IAM authentication"),
+                              tr("This OAuth callback does not match a pending Psi login."));
+        return;
+    }
 
     // scheme
     if (uri.scheme() != "xmpp") {

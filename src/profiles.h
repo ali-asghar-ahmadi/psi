@@ -56,6 +56,12 @@ public:
     QString id;
     QString name;
     QString jid, pass, host, resource, authid, realm;
+    bool    iamAuthEnabled = false;
+    QString iamAuthorizationEndpoint, iamTokenEndpoint, iamRedirectUri;
+    QString iamAudience, iamClientId, iamClientSecret, iamScope;
+    bool    iamUseSaslOauth = false;
+    bool    iamUseIdToken = false;
+    bool    iamUseAuthorizationCode = false;
     QString scramSaltedHashPassword;
     bool    customAuth;
     bool    storeSaltedHashedPassword;

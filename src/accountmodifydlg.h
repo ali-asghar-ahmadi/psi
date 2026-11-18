@@ -72,6 +72,7 @@ private slots:
     void resourceCbChanged(int index);
     void priorityCbChanged(int index);
     void autoconnectCksChanged();
+    void updateIamAuthUi();
 
 private:
     bool checkSSL();
